@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Waking Switch 2 Controller...</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding-top: 100px;
+            box-sizing: border-box;
+        }
+        h2 { color: #00ffcc; }
+        .btn {
+            background-color: #00ffcc;
+            color: #000;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+            display: none;
+        }
+        .btn:hover { background-color: #00ccaa; }
+        #status {
+            font-size: 18px;
+            margin-top: 20px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <h2>Nintendo Switch 2 Pro Controller Auto-Wake</h2>
+    <div id="status">Checking for paired controller...</div>
+    <button id="pairBtn" class="btn">Pair Controller (First Time Only)</button>
+
+    <script>
+        const VENDOR_ID = 0x057E;
+        const PRODUCT_ID = 0x2069;
+        const USB_INTERFACE_NUMBER = 1;
+
+        const INIT_COMMAND_0x03 = new Uint8Array([
+            0x03, 0x91, 0x00, 0x0d, 0x00, 0x08,
+            0x00, 0x00, 0x01, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ]);
+
+        const statusEl = document.getElementById('status');
+        const pairBtn = document.getElementById('pairBtn');
+
+        function updateStatus(msg, isError = false) {
+            statusEl.textContent = msg;
+            statusEl.style.color = isError ? '#ff4444' : '#aaa';
+            console.log(msg);
+        }
+
+        async function notifyServer(success) {
+            try {
+                await fetch('/done', {
+                    method: 'POST',
+                    body: JSON.stringify({ success }),
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (e) {
+                console.error("Failed to notify server:", e);
+            }
+        }
+
+        async function wakeDevice(device) {
+            try {
+                updateStatus(`Found: ${device.productName}. Opening...`);
+                await device.open();
+
+                if (device.configuration === null) {
+                    await device.selectConfiguration(1);
+                }
+
+                updateStatus('Claiming Interface 1...');
+                await device.claimInterface(USB_INTERFACE_NUMBER);
+
+                let outEndpoint = null;
+                const endpoints = device.configuration.interfaces[USB_INTERFACE_NUMBER].alternate.endpoints;
+                for (const ep of endpoints) {
+                    if (ep.direction === 'out' && ep.type === 'bulk') {
+                        outEndpoint = ep.endpointNumber;
+                        break;
+                    }
+                }
+
+                if (!outEndpoint) {
+                    throw new Error("Could not find Bulk OUT endpoint");
+                }
+
+                updateStatus('Sending wake command...');
+                await device.transferOut(outEndpoint, INIT_COMMAND_0x03);
+
+                updateStatus('Controller woke up successfully! You can close this window.', false);
+                statusEl.style.color = '#00ffcc';
+                await notifyServer(true);
+
+                setTimeout(() => window.close(), 2000);
+            } catch (err) {
+                updateStatus('Error: ' + err.message, true);
+                await notifyServer(false);
+            }
+        }
+
+        async function checkAutoConnect() {
+            try {
+                const devices = await navigator.usb.getDevices();
+                const controller = devices.find(d => d.vendorId === VENDOR_ID && d.productId === PRODUCT_ID);
+
+                if (controller) {
+                    await wakeDevice(controller);
+                } else {
+                    updateStatus('No paired controller found. Please click the button below to pair it.', false);
+                    pairBtn.style.display = 'block';
+                }
+            } catch (err) {
+                updateStatus('WebUSB Error: ' + err.message, true);
+                pairBtn.style.display = 'block';
+            }
+        }
+
+        pairBtn.addEventListener('click', async () => {
+            try {
+                updateStatus('Waiting for selection...');
+                const device = await navigator.usb.requestDevice({
+                    filters: [{ vendorId: VENDOR_ID, productId: PRODUCT_ID }]
+                });
+                pairBtn.style.display = 'none';
+                await wakeDevice(device);
+            } catch (err) {
+                updateStatus('Pairing cancelled or failed: ' + err.message, true);
+            }
+        });
+
+        window.onload = checkAutoConnect;
+    </script>
+</body>
+</html>
