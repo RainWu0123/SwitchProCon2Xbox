@@ -108,10 +108,32 @@ class TestParseStandardSwitch2(unittest.TestCase):
 
     def test_back_grips(self):
         data = _base_report(0x09)
-        data[5] = 0x04 | 0x08  # gz + gl
+        data[5] = 0x04 | 0x08  # GR + GL
         self.ctrl._parse_standard(data)
-        self.assertTrue(self.ctrl.state.gz)
+        self.assertTrue(self.ctrl.state.gr)
+        self.assertTrue(self.ctrl.state.gz)  # Backward-compatible alias
         self.assertTrue(self.ctrl.state.gl)
+
+    def test_stick_clicks_are_not_c_button(self):
+        data = _base_report(0x09)
+        data[3] = 0x80  # R3
+        data[4] = 0x80  # L3
+        data[5] = 0x10  # C, not a stick click
+        self.ctrl._parse_standard(data)
+        self.assertTrue(self.ctrl.state.l_stick_click)
+        self.assertTrue(self.ctrl.state.r_stick_click)
+        self.assertTrue(self.ctrl.state.c)
+        data[3] = data[4] = 0
+        self.ctrl._parse_standard(data)
+        self.assertFalse(self.ctrl.state.l_stick_click)
+        self.assertFalse(self.ctrl.state.r_stick_click)
+        self.assertTrue(self.ctrl.state.c)
+
+    def test_switch2_battery_bits(self):
+        data = _base_report(0x09)
+        data[2] = 0x24  # battery=9 in bits 2..5, no high nibble match
+        self.ctrl._parse_standard(data)
+        self.assertEqual(self.ctrl.state.battery_level, 9)
 
 
 class TestHandleReport(unittest.TestCase):
@@ -144,6 +166,14 @@ class TestHandleReport(unittest.TestCase):
 
 
 class TestSimpleReport(unittest.TestCase):
+    def test_simple_report_clears_unavailable_buttons(self):
+        ctrl = SwitchProController()
+        ctrl.state.a = True
+        ctrl.state.zl = True
+        ctrl._parse_simple([0x3F, 0x00, 0x00, 8] + [0] * 8)
+        self.assertFalse(ctrl.state.a)
+        self.assertFalse(ctrl.state.zl)
+
     def test_hat_up(self):
         ctrl = SwitchProController()
         data = [0x3F, 0x00, 0x00, 0] + [0] * 12  # hat = 0 up
