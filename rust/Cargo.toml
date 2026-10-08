@@ -1,0 +1,18 @@
+[package]
+name = "switchprocon2xbox-core"
+version = "2.0.0-alpha.1"
+edition = "2021"
+rust-version = "1.83"
+publish = false
+license = "MIT OR Apache-2.0"
+description = "Driver-independent Nintendo Switch Pro to Xbox input core"
+
+[lib]
+name = "switchprocon2xbox_core"
+path = "src/lib.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
