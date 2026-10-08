@@ -39,7 +39,9 @@ class ControllerState:
     r_stick_click: bool = False
     # Back grip buttons (Switch 2 only)
     gl: bool = False
-    gz: bool = False
+    gr: bool = False
+    gz: bool = False  # Deprecated alias for GR; kept for older integrations.
+    c: bool = False
     # D-pad
     dpad_up: bool = False
     dpad_down: bool = False
@@ -377,8 +379,12 @@ class SwitchProController:
 
         report_id = data[0]
 
-        # Battery (high nibble of byte 2)
-        self.state.battery_level = (data[2] >> 4) & 0x0F
+        # Switch 2 report 0x09 encodes battery in bits 2..5,
+        # while the original Pro Controller uses bits 4..7.
+        if report_id == 0x09:
+            self.state.battery_level = (data[2] >> 2) & 0x0F
+        else:
+            self.state.battery_level = (data[2] >> 4) & 0x0F
 
         b3 = data[3]
         b4 = data[4]
@@ -408,16 +414,20 @@ class SwitchProController:
             self.state.zl = bool(b4 & 0x20)
             self.state.minus = bool(b4 & 0x40)
 
-            # Byte 5: Center & back of controller (Home, Capture, Back buttons, C clicks)
+            # Pro Controller 2 report 0x09: stick clicks are in the high
+            # bits of the right/left button bytes, NOT in byte 5.
+            self.state.r_stick_click = bool(b3 & 0x80)
+            self.state.l_stick_click = bool(b4 & 0x80)
             self.state.home = bool(b5 & 0x01)
             self.state.capture = bool(b5 & 0x02)
-            self.state.gz = bool(b5 & 0x04)  # GZ back grip button
-            self.state.gl = bool(b5 & 0x08)  # GL back grip button
-            self.state.l_stick_click = bool(b5 & 0x10)  # C key acts as L3
-            self.state.r_stick_click = bool(b5 & 0x20)  # R3 click
+            self.state.gr = bool(b5 & 0x04)
+            self.state.gz = self.state.gr  # Compatibility alias.
+            self.state.gl = bool(b5 & 0x08)
+            self.state.c = bool(b5 & 0x10)
 
         else:
             # === Switch 1 Pro Controller standard mapping ===
+            self.state.gr = self.state.gz = self.state.gl = self.state.c = False
             # Byte 3: Right-side buttons
             self.state.y = bool(b3 & 0x01)
             self.state.x = bool(b3 & 0x02)
@@ -454,6 +464,12 @@ class SwitchProController:
         """Parse a simple HID input report (0x3F) - fallback mode."""
         if len(data) < 4:
             return
+
+        # Simple mode cannot express these buttons: clear values from
+        # previous full reports rather than leaving them stuck as pressed.
+        self.state.a = self.state.b = self.state.x = self.state.y = False
+        self.state.l = self.state.r = self.state.zl = self.state.zr = False
+        self.state.gl = self.state.gr = self.state.gz = self.state.c = False
 
         # Byte 2: shared / system buttons
         b2 = data[2]
